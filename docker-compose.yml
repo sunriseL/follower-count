@@ -1,0 +1,43 @@
+services:
+  follower-tracker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: follower-tracker
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MPLCONFIGDIR=/tmp/matplotlib
+      # 应用配置 - 从.env文件或环境变量加载
+      - APP_NAME=${APP_NAME:-Follower Tracker}
+      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - DEBUG=${DEBUG:-false}
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8000}
+      - DATA_DIR=${DATA_DIR:-/app/data}
+      - DB_PATH=${DB_PATH:-/app/data/data.db}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - FETCH_INTERVAL=${FETCH_INTERVAL:-10}
+      - DEFAULT_INSTAGRAM_USER=${DEFAULT_INSTAGRAM_USER:-kohinata_mika}
+      - DEFAULT_TWITTER_USER=${DEFAULT_TWITTER_USER:-kohinatamika}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - TWITTER_AUTH_TOKEN=${TWITTER_AUTH_TOKEN:-}
+      - RSSHUB_URL=${RSSHUB_URL:-http://172.31.240.1:1200}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - follower-tracker-network
+
+networks:
+  follower-tracker-network:
+    driver: bridge 
