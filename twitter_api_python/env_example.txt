@@ -1,0 +1,20 @@
+# Twitter API 配置
+# 复制此文件为 .env 并填入你的配置
+
+# Twitter 认证 Token (可选，如果使用用户名密码登录则不需要)
+TWITTER_AUTH_TOKEN=e1429d05dccb1d08ee1f02d64267ce64d1287355
+
+# Twitter 用户名 (可选，用于自动登录)
+TWITTER_USERNAME=your_username_here
+
+# Twitter 密码 (可选，用于自动登录)
+TWITTER_PASSWORD=your_password_here
+
+# Twitter 2FA 密钥 (可选，如果启用了2FA)
+TWITTER_AUTHENTICATION_SECRET=your_2fa_secret_here
+
+# HTTP 代理 (可选，格式: http://127.0.0.1:7890)
+HTTP_PROXY=http://127.0.0.1:7890
+
+# 第三方 API 地址 (可选)
+TWITTER_THIRD_PARTY_API=https://your-third-party-api.com 
