@@ -554,6 +554,10 @@ async def generate_chart(platform: str, username: str):
 
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No data found for {platform}/{username}")
+        
+        # 检查数据点数量，如果太少可能导致图表生成问题
+        if len(df) < 1:
+            raise HTTPException(status_code=404, detail=f"Insufficient data points for {platform}/{username} (minimum 1 required)")
 
         # 处理时间：更安全的时间解析
         try:
@@ -583,11 +587,18 @@ async def generate_chart(platform: str, username: str):
         # 确保数据不为空
         if len(df) == 0:
             raise HTTPException(status_code=404, detail=f"No valid data points for {platform}/{username}")
-            
-        sns.lineplot(
-            data=df, x='time', y='follower_count',
-            marker='o', linewidth=1, markersize=5, alpha=0.9, markeredgewidth=0
-        )
+        
+        # 数据点过少的特殊处理
+        if len(df) == 1:
+            # 只有一个数据点时，使用散点图而不是线图
+            plt.scatter(df['time'], df['follower_count'], s=100, alpha=0.8, color='blue')
+            plt.axhline(y=df['follower_count'].iloc[0], color='gray', linestyle='--', alpha=0.5)
+        else:
+            # 多个数据点时，使用线图
+            sns.lineplot(
+                data=df, x='time', y='follower_count',
+                marker='o', linewidth=1, markersize=5, alpha=0.9, markeredgewidth=0
+            )
         
         generate_time = datetime.now().strftime('Created at: %Y-%m-%d %H:%M:%S')
         plt.text(
@@ -601,14 +612,26 @@ async def generate_chart(platform: str, username: str):
         ax = plt.gca()
         
         # 根据数据量调整时间轴间隔
-        if len(df) > 24:
+        if len(df) == 1:
+            # 只有一个数据点时，不设置时间轴定位器，避免卡死
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+        elif len(df) > 24:
             ax.xaxis.set_major_locator(mdates.HourLocator(interval=24))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
         elif len(df) > 6:
             ax.xaxis.set_major_locator(mdates.HourLocator(interval=6))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
         else:
-            ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
-            
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+            # 数据点较少时，使用更安全的时间轴设置
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+            # 手动设置刻度位置，避免自动定位器的问题
+            if len(df) > 1:
+                time_range = df['time'].max() - df['time'].min()
+                if time_range.total_seconds() > 3600:  # 超过1小时
+                    ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
+                else:
+                    # 时间范围较小，不设置自动定位器
+                    pass
 
         plt.xlabel("Time")
         plt.ylabel("Follower Count")
@@ -617,7 +640,21 @@ async def generate_chart(platform: str, username: str):
 
         # 保存到内存
         buffer = BytesIO()
-        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+        
+        # 设置保存参数，避免在数据点过少时出现问题
+        save_kwargs = {
+            'format': 'png',
+            'dpi': 100,
+            'bbox_inches': 'tight',
+            'pad_inches': 0.1
+        }
+        
+        # 如果数据点很少，使用更保守的设置
+        if len(df) <= 2:
+            save_kwargs['dpi'] = 72  # 降低分辨率
+            save_kwargs['bbox_inches'] = None  # 不使用tight布局
+        
+        plt.savefig(buffer, **save_kwargs)
         buffer.seek(0)
         plt.close()
 
