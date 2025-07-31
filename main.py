@@ -362,6 +362,18 @@ async def add_user(user: UserRequest):
         # 首先验证用户
         validation_result = await validate_user(user.platform, user.username)
         
+        # 如果验证失败，不添加到数据库
+        if not validation_result["valid"]:
+            return UserValidationResponse(
+                id=0,
+                platform=user.platform,
+                username=user.username,
+                created_at="",
+                is_active=False,
+                validation_result=validation_result
+            )
+        
+        # 验证成功，添加到数据库
         async with aiosqlite.connect(settings.db_path) as db:
             cursor = await db.execute(
                 "INSERT INTO tracked_users (platform, username, is_active) VALUES (?, ?, 1)",
