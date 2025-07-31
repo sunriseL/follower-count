@@ -66,10 +66,30 @@ class FollowerResponse(BaseModel):
     follower_count: int
     time: str
 
+class UserRequest(BaseModel):
+    platform: str
+    username: str
+
+class UserResponse(BaseModel):
+    id: int
+    platform: str
+    username: str
+    created_at: str
+    is_active: bool
+
+class UserValidationResponse(BaseModel):
+    id: int
+    platform: str
+    username: str
+    created_at: str
+    is_active: bool
+    validation_result: dict
+
 # 数据库初始化
 async def init_database():
     """初始化数据库"""
     async with aiosqlite.connect(settings.db_path) as db:
+        # 创建粉丝数据表
         await db.execute('''
         CREATE TABLE IF NOT EXISTS social_media (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,8 +98,98 @@ async def init_database():
             follower_count INTEGER NOT NULL,
             time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );''')
+        
+        # 创建用户管理表
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS tracked_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL,
+            username TEXT NOT NULL,
+            is_active BOOLEAN DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(platform, username)
+        );''')
+        
+        await db.commit()
+        
+        # 插入默认用户（如果不存在）
+        await db.execute('''
+        INSERT OR IGNORE INTO tracked_users (platform, username, is_active) 
+        VALUES (?, ?, 1)
+        ''', ("instagram", settings.default_instagram_user))
+        
+        await db.execute('''
+        INSERT OR IGNORE INTO tracked_users (platform, username, is_active) 
+        VALUES (?, ?, 1)
+        ''', ("twitter", settings.default_twitter_user))
+        
         await db.commit()
         logger.info("Database initialized successfully")
+
+# 获取所有活跃用户
+async def get_active_users():
+    """获取所有活跃的跟踪用户"""
+    async with aiosqlite.connect(settings.db_path) as db:
+        cursor = await db.execute(
+            "SELECT id, platform, username, created_at, is_active FROM tracked_users WHERE is_active = 1"
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row[0],
+                "platform": row[1],
+                "username": row[2],
+                "created_at": row[3],
+                "is_active": bool(row[4])
+            }
+            for row in rows
+        ]
+
+# 验证用户是否可以获取follower count
+async def validate_user(platform: str, username: str):
+    """验证用户是否可以获取follower count"""
+    try:
+        if platform.lower() == "instagram":
+            follower_count = await fetch_instagram_followers(username)
+            if follower_count is not None:
+                return {
+                    "valid": True,
+                    "follower_count": follower_count,
+                    "message": f"Successfully fetched {follower_count} followers"
+                }
+            else:
+                return {
+                    "valid": False,
+                    "follower_count": None,
+                    "message": "Failed to fetch Instagram followers"
+                }
+        elif platform.lower() == "twitter":
+            follower_count = await fetch_twitter_followers(username)
+            if follower_count is not None:
+                return {
+                    "valid": True,
+                    "follower_count": follower_count,
+                    "message": f"Successfully fetched {follower_count} followers"
+                }
+            else:
+                return {
+                    "valid": False,
+                    "follower_count": None,
+                    "message": "Failed to fetch Twitter followers"
+                }
+        else:
+            return {
+                "valid": False,
+                "follower_count": None,
+                "message": f"Unsupported platform: {platform}"
+            }
+    except Exception as e:
+        logger.error(f"Error validating user {username} on {platform}: {e}")
+        return {
+            "valid": False,
+            "follower_count": None,
+            "message": f"Validation error: {str(e)}"
+        }
 
 # Instagram粉丝数抓取
 async def fetch_instagram_followers(username: str = None):
@@ -154,14 +264,28 @@ async def fetch_twitter_followers(username: str = None):
         logger.error(f"Error fetching Twitter followers for {username}: {e}")
         return None
 
-# 定时任务
+# 定时任务 - 支持多个用户
 async def scheduled_instagram_fetch():
-    """定时抓取Instagram数据"""
-    await fetch_instagram_followers()
+    """定时抓取Instagram数据 - 支持多个用户"""
+    users = await get_active_users()
+    instagram_users = [user for user in users if user["platform"] == "instagram"]
+    
+    for user in instagram_users:
+        try:
+            await fetch_instagram_followers(user["username"])
+        except Exception as e:
+            logger.error(f"Error fetching Instagram data for {user['username']}: {e}")
 
 async def scheduled_twitter_fetch():
-    """定时抓取Twitter数据"""
-    await fetch_twitter_followers()
+    """定时抓取Twitter数据 - 支持多个用户"""
+    users = await get_active_users()
+    twitter_users = [user for user in users if user["platform"] == "twitter"]
+    
+    for user in twitter_users:
+        try:
+            await fetch_twitter_followers(user["username"])
+        except Exception as e:
+            logger.error(f"Error fetching Twitter data for {user['username']}: {e}")
 
 # 启动时初始化
 @app.on_event("startup")
@@ -204,6 +328,126 @@ async def root():
 async def health_check():
     """健康检查"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+# 用户管理API端点
+@app.get("/api/users", response_model=List[UserResponse])
+async def get_users():
+    """获取所有跟踪的用户"""
+    try:
+        async with aiosqlite.connect(settings.db_path) as db:
+            cursor = await db.execute(
+                "SELECT id, platform, username, created_at, is_active FROM tracked_users ORDER BY platform, username"
+            )
+            rows = await cursor.fetchall()
+            
+            return [
+                UserResponse(
+                    id=row[0],
+                    platform=row[1],
+                    username=row[2],
+                    created_at=row[3],
+                    is_active=bool(row[4])
+                )
+                for row in rows
+            ]
+            
+    except Exception as e:
+        logger.error(f"Error fetching users: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/users", response_model=UserValidationResponse)
+async def add_user(user: UserRequest):
+    """添加新的跟踪用户，并验证用户是否可以获取follower count"""
+    try:
+        # 首先验证用户
+        validation_result = await validate_user(user.platform, user.username)
+        
+        async with aiosqlite.connect(settings.db_path) as db:
+            cursor = await db.execute(
+                "INSERT INTO tracked_users (platform, username, is_active) VALUES (?, ?, 1)",
+                (user.platform, user.username)
+            )
+            await db.commit()
+            
+            # 获取插入的用户信息
+            cursor = await db.execute(
+                "SELECT id, platform, username, created_at, is_active FROM tracked_users WHERE id = ?",
+                (cursor.lastrowid,)
+            )
+            row = await cursor.fetchone()
+            
+            return UserValidationResponse(
+                id=row[0],
+                platform=row[1],
+                username=row[2],
+                created_at=row[3],
+                is_active=bool(row[4]),
+                validation_result=validation_result
+            )
+            
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="User already exists")
+    except Exception as e:
+        logger.error(f"Error adding user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(user_id: int):
+    """删除用户（软删除，设置为非活跃）"""
+    try:
+        async with aiosqlite.connect(settings.db_path) as db:
+            cursor = await db.execute(
+                "UPDATE tracked_users SET is_active = 0 WHERE id = ?",
+                (user_id,)
+            )
+            await db.commit()
+            
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="User not found")
+            
+            return {"message": "User deleted successfully"}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/users/{user_id}/activate")
+async def activate_user(user_id: int):
+    """激活用户"""
+    try:
+        async with aiosqlite.connect(settings.db_path) as db:
+            cursor = await db.execute(
+                "UPDATE tracked_users SET is_active = 1 WHERE id = ?",
+                (user_id,)
+            )
+            await db.commit()
+            
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="User not found")
+            
+            return {"message": "User activated successfully"}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error activating user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/users/validate")
+async def validate_user_endpoint(user: UserRequest):
+    """验证用户是否可以获取follower count（不添加到数据库）"""
+    try:
+        validation_result = await validate_user(user.platform, user.username)
+        return {
+            "platform": user.platform,
+            "username": user.username,
+            "validation_result": validation_result
+        }
+    except Exception as e:
+        logger.error(f"Error validating user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/followers", response_model=List[FollowerResponse])
 async def get_followers(
@@ -410,10 +654,15 @@ async def get_stats():
             cursor = await db.execute("SELECT platform, username, COUNT(*) FROM social_media GROUP BY platform, username")
             user_stats = await cursor.fetchall()
             
+            # 活跃用户统计
+            cursor = await db.execute("SELECT platform, COUNT(*) FROM tracked_users WHERE is_active = 1 GROUP BY platform")
+            active_users = await cursor.fetchall()
+            
             return {
                 "total_records": total_records,
                 "platform_stats": {row[0]: row[1] for row in platform_stats},
-                "user_stats": [{"platform": row[0], "username": row[1], "records": row[2]} for row in user_stats]
+                "user_stats": [{"platform": row[0], "username": row[1], "records": row[2]} for row in user_stats],
+                "active_users": {row[0]: row[1] for row in active_users}
             }
             
     except Exception as e:

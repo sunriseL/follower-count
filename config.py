@@ -43,6 +43,8 @@ class Settings(BaseSettings):
         # 允许从环境变量加载，支持大写和下划线格式
         env_prefix = ""
         alias_generator = lambda string: string.upper().replace(".", "_")
+        # 允许额外的字段
+        extra = "ignore"
 
     def model_post_init(self, __context):
         """初始化后处理"""
