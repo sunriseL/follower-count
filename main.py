@@ -580,9 +580,9 @@ async def generate_chart(platform: str, username: str):
         # 按时间排序
         df = df.sort_values('time')
 
-        # 绘图
-        plt.figure(figsize=(14, 6))
-        sns.set(style="whitegrid")
+        # 设置图表样式
+        plt.style.use('seaborn-v0_8')
+        fig, ax = plt.subplots(figsize=(16, 8))
         
         # 确保数据不为空
         if len(df) == 0:
@@ -591,68 +591,126 @@ async def generate_chart(platform: str, username: str):
         # 数据点过少的特殊处理
         if len(df) == 1:
             # 只有一个数据点时，使用散点图而不是线图
-            plt.scatter(df['time'], df['follower_count'], s=100, alpha=0.8, color='blue')
-            plt.axhline(y=df['follower_count'].iloc[0], color='gray', linestyle='--', alpha=0.5)
+            ax.scatter(df['time'], df['follower_count'], s=150, alpha=0.8, color='#2E86AB', zorder=5)
+            ax.axhline(y=df['follower_count'].iloc[0], color='#A23B72', linestyle='--', alpha=0.6, linewidth=2)
         else:
             # 多个数据点时，使用线图
-            sns.lineplot(
-                data=df, x='time', y='follower_count',
-                marker='o', linewidth=1, markersize=5, alpha=0.9, markeredgewidth=0
-            )
+            ax.plot(df['time'], df['follower_count'], 
+                   marker='o', linewidth=2.5, markersize=6, 
+                   color='#2E86AB', alpha=0.9, markeredgewidth=0,
+                   markerfacecolor='#2E86AB', markeredgecolor='white')
+            
+            # 添加渐变填充
+            ax.fill_between(df['time'], df['follower_count'], 
+                           alpha=0.3, color='#2E86AB')
         
-        generate_time = datetime.now().strftime('Created at: %Y-%m-%d %H:%M:%S')
-        plt.text(
-            0.99, 0.01, generate_time,
-            fontsize=8, color='gray',
-            ha='right', va='bottom',
-            transform=plt.gca().transAxes
-        )
+        # 设置标题和标签
+        ax.set_title(f"{username} - {platform.title()} Follower Trend", 
+                    fontsize=20, fontweight='bold', pad=20, color='#2C3E50')
+        ax.set_xlabel("Time", fontsize=14, fontweight='bold', color='#2C3E50')
+        ax.set_ylabel("Follower Count", fontsize=14, fontweight='bold', color='#2C3E50')
         
-        plt.title(f"{username} - {platform}")
-        ax = plt.gca()
+        # 优化Y轴格式，避免科学计数法
+        def format_y_axis(x, pos):
+            if x >= 1e6:
+                return f'{x/1e6:.1f}M'
+            elif x >= 1e3:
+                return f'{x/1e3:.1f}K'
+            else:
+                return f'{int(x):,}'
         
-        # 根据数据量调整时间轴间隔
-        if len(df) == 1:
-            # 只有一个数据点时，不设置时间轴定位器，避免卡死
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-        elif len(df) > 24:
-            ax.xaxis.set_major_locator(mdates.HourLocator(interval=24))
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-        elif len(df) > 6:
-            ax.xaxis.set_major_locator(mdates.HourLocator(interval=6))
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(format_y_axis))
+        
+        # 智能调整X轴刻度数量
+        data_points = len(df)
+        time_range = df['time'].max() - df['time'].min()
+        
+        # 根据数据点数量和时间范围智能设置X轴刻度
+        if data_points <= 5:
+            # 数据点很少，显示所有点
+            ax.set_xticks(df['time'])
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+        elif data_points <= 12:
+            # 中等数据量，每2-3个点显示一个刻度
+            step = max(1, data_points // 6)
+            ticks = df['time'][::step]
+            ax.set_xticks(ticks)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+        elif data_points <= 48:
+            # 较多数据量，每6-8个点显示一个刻度
+            step = max(1, data_points // 8)
+            ticks = df['time'][::step]
+            ax.set_xticks(ticks)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
         else:
-            # 数据点较少时，使用更安全的时间轴设置
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-            # 手动设置刻度位置，避免自动定位器的问题
-            if len(df) > 1:
-                time_range = df['time'].max() - df['time'].min()
-                if time_range.total_seconds() > 3600:  # 超过1小时
-                    ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
-                else:
-                    # 时间范围较小，不设置自动定位器
-                    pass
-
-        plt.xlabel("Time")
-        plt.ylabel("Follower Count")
-        plt.xticks(rotation=45)
+            # 大量数据，根据时间范围设置
+            if time_range.days > 7:
+                # 超过一周，按天显示
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, time_range.days // 10)))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            elif time_range.days > 1:
+                # 超过一天，按小时显示
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, int(time_range.total_seconds() / 3600) // 8)))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+            else:
+                # 一天内，按小时显示
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, int(time_range.total_seconds() / 3600) // 6)))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        
+        # 设置网格样式
+        ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+        
+        # 设置背景色
+        ax.set_facecolor('#F8F9FA')
+        fig.patch.set_facecolor('white')
+        
+        # 添加统计信息
+        current_followers = df['follower_count'].iloc[-1]
+        max_followers = df['follower_count'].max()
+        min_followers = df['follower_count'].min()
+        growth = current_followers - df['follower_count'].iloc[0]
+        growth_percent = (growth / df['follower_count'].iloc[0] * 100) if df['follower_count'].iloc[0] > 0 else 0
+        
+        stats_text = f"Current: {format_y_axis(current_followers, None)}\n"
+        stats_text += f"Growth: {format_y_axis(growth, None)} ({growth_percent:+.1f}%)\n"
+        stats_text += f"Range: {format_y_axis(min_followers, None)} - {format_y_axis(max_followers, None)}"
+        
+        # 在图表右上角添加统计信息
+        ax.text(0.98, 0.98, stats_text,
+                transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8, edgecolor='#BDC3C7'))
+        
+        # 添加生成时间
+        generate_time = datetime.now().strftime('Generated: %Y-%m-%d %H:%M:%S')
+        ax.text(0.02, 0.02, generate_time,
+                fontsize=8, color='#7F8C8D',
+                transform=ax.transAxes,
+                verticalalignment='bottom')
+        
+        # 旋转X轴标签
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        
+        # 调整布局
         plt.tight_layout()
 
         # 保存到内存
         buffer = BytesIO()
         
-        # 设置保存参数，避免在数据点过少时出现问题
+        # 设置保存参数
         save_kwargs = {
             'format': 'png',
-            'dpi': 100,
+            'dpi': 150,
             'bbox_inches': 'tight',
-            'pad_inches': 0.1
+            'pad_inches': 0.2,
+            'facecolor': 'white',
+            'edgecolor': 'none'
         }
         
         # 如果数据点很少，使用更保守的设置
         if len(df) <= 2:
-            save_kwargs['dpi'] = 72  # 降低分辨率
-            save_kwargs['bbox_inches'] = None  # 不使用tight布局
+            save_kwargs['dpi'] = 100
         
         plt.savefig(buffer, **save_kwargs)
         buffer.seek(0)

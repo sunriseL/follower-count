@@ -8,6 +8,6 @@ matplotlib==3.8.2
 seaborn==0.13.0
 python-multipart==0.0.6
 APScheduler==3.10.4
-pydantic==2.5.0
-pydantic-settings==2.1.0
+pydantic==2.4.2
+pydantic-settings==2.0.3
 python-dotenv==1.0.0 
