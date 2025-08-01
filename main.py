@@ -621,40 +621,45 @@ async def generate_chart(platform: str, username: str):
         
         ax.yaxis.set_major_formatter(plt.FuncFormatter(format_y_axis))
         
-        # 智能调整X轴刻度数量
+        # 智能调整X轴刻度数量 - 先决定tick数量，再分配时间点
         data_points = len(df)
         time_range = df['time'].max() - df['time'].min()
         
-        # 根据数据点数量和时间范围智能设置X轴刻度
+        # 根据图表宽度和可读性决定理想的tick数量
+        # 假设每个tick标签需要约80像素宽度，图表宽度约1200像素
+        max_ticks = 8  # 最大tick数量，确保标签不重叠
+        
         if data_points <= 5:
             # 数据点很少，显示所有点
             ax.set_xticks(df['time'])
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
-        elif data_points <= 12:
-            # 中等数据量，每2-3个点显示一个刻度
-            step = max(1, data_points // 6)
-            ticks = df['time'][::step]
-            ax.set_xticks(ticks)
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
-        elif data_points <= 48:
-            # 较多数据量，每6-8个点显示一个刻度
-            step = max(1, data_points // 8)
-            ticks = df['time'][::step]
-            ax.set_xticks(ticks)
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
         else:
-            # 大量数据，根据时间范围设置
-            if time_range.days > 7:
-                # 超过一周，按天显示
-                ax.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, time_range.days // 10)))
+            # 根据时间范围和数据点数量决定tick数量
+            if time_range.days > 30:
+                # 超过一个月，最多显示6个tick
+                target_ticks = min(6, max_ticks)
+                tick_interval = max(1, time_range.days // target_ticks)
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=tick_interval))
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            elif time_range.days > 7:
+                # 超过一周，最多显示8个tick
+                target_ticks = min(8, max_ticks)
+                tick_interval = max(1, time_range.days // target_ticks)
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=tick_interval))
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
             elif time_range.days > 1:
-                # 超过一天，按小时显示
-                ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, int(time_range.total_seconds() / 3600) // 8)))
+                # 超过一天，最多显示6个tick
+                target_ticks = min(6, max_ticks)
+                hours_range = int(time_range.total_seconds() / 3600)
+                tick_interval = max(1, hours_range // target_ticks)
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=tick_interval))
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
             else:
-                # 一天内，按小时显示
-                ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, int(time_range.total_seconds() / 3600) // 6)))
+                # 一天内，最多显示8个tick
+                target_ticks = min(8, max_ticks)
+                hours_range = int(time_range.total_seconds() / 3600)
+                tick_interval = max(1, hours_range // target_ticks)
+                ax.xaxis.set_major_locator(mdates.HourLocator(interval=tick_interval))
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
         
         # 设置网格样式
