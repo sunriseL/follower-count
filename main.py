@@ -588,6 +588,21 @@ async def generate_chart(platform: str, username: str):
         if len(df) == 0:
             raise HTTPException(status_code=404, detail=f"No valid data points for {platform}/{username}")
         
+        # 计算Y轴范围，不从0开始，让数据差异更明显
+        min_followers = df['follower_count'].min()
+        max_followers = df['follower_count'].max()
+        follower_range = max_followers - min_followers
+        
+        # 设置Y轴范围，留出10%的边距，但不从0开始
+        if follower_range > 0:
+            y_margin = follower_range * 0.1
+            y_min = max(0, min_followers - y_margin)  # 确保不小于0
+            y_max = max_followers + y_margin
+        else:
+            # 如果所有数据点相同，设置一个合理的范围
+            y_min = max(0, min_followers * 0.95)
+            y_max = min_followers * 1.05
+        
         # 数据点过少的特殊处理
         if len(df) == 1:
             # 只有一个数据点时，使用散点图而不是线图
@@ -603,6 +618,9 @@ async def generate_chart(platform: str, username: str):
             # 添加渐变填充
             ax.fill_between(df['time'], df['follower_count'], 
                            alpha=0.3, color='#2E86AB')
+        
+        # 设置Y轴范围
+        ax.set_ylim(y_min, y_max)
         
         # 设置标题和标签
         ax.set_title(f"{username} - {platform.title()} Follower Trend", 
@@ -627,7 +645,7 @@ async def generate_chart(platform: str, username: str):
         
         # 根据图表宽度和可读性决定理想的tick数量
         # 假设每个tick标签需要约80像素宽度，图表宽度约1200像素
-        max_ticks = 8  # 最大tick数量，确保标签不重叠
+        max_ticks = 10  # 降低最大tick数量，确保标签不重叠
         
         if data_points <= 5:
             # 数据点很少，显示所有点
@@ -636,27 +654,27 @@ async def generate_chart(platform: str, username: str):
         else:
             # 根据时间范围和数据点数量决定tick数量
             if time_range.days > 30:
-                # 超过一个月，最多显示6个tick
-                target_ticks = min(6, max_ticks)
+                # 超过一个月，最多显示5个tick
+                target_ticks = min(10, max_ticks)
                 tick_interval = max(1, time_range.days // target_ticks)
                 ax.xaxis.set_major_locator(mdates.DayLocator(interval=tick_interval))
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
             elif time_range.days > 7:
-                # 超过一周，最多显示8个tick
-                target_ticks = min(8, max_ticks)
+                # 超过一周，最多显示6个tick
+                target_ticks = min(10, max_ticks)
                 tick_interval = max(1, time_range.days // target_ticks)
                 ax.xaxis.set_major_locator(mdates.DayLocator(interval=tick_interval))
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
             elif time_range.days > 1:
-                # 超过一天，最多显示6个tick
-                target_ticks = min(6, max_ticks)
+                # 超过一天，最多显示5个tick
+                target_ticks = min(10, max_ticks)
                 hours_range = int(time_range.total_seconds() / 3600)
                 tick_interval = max(1, hours_range // target_ticks)
                 ax.xaxis.set_major_locator(mdates.HourLocator(interval=tick_interval))
                 ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
             else:
-                # 一天内，最多显示8个tick
-                target_ticks = min(8, max_ticks)
+                # 一天内，最多显示6个tick
+                target_ticks = min(10, max_ticks)
                 hours_range = int(time_range.total_seconds() / 3600)
                 tick_interval = max(1, hours_range // target_ticks)
                 ax.xaxis.set_major_locator(mdates.HourLocator(interval=tick_interval))
@@ -670,22 +688,54 @@ async def generate_chart(platform: str, username: str):
         ax.set_facecolor('#F8F9FA')
         fig.patch.set_facecolor('white')
         
-        # 添加统计信息
+        # 计算详细的统计信息
         current_followers = df['follower_count'].iloc[-1]
+        initial_followers = df['follower_count'].iloc[0]
         max_followers = df['follower_count'].max()
         min_followers = df['follower_count'].min()
-        growth = current_followers - df['follower_count'].iloc[0]
-        growth_percent = (growth / df['follower_count'].iloc[0] * 100) if df['follower_count'].iloc[0] > 0 else 0
         
+        # 总体增长率
+        total_growth = current_followers - initial_followers
+        total_growth_percent = (total_growth / initial_followers * 100) if initial_followers > 0 else 0
+        
+        # 计算每日增长率（如果有足够的数据点）
+        daily_growth_info = ""
+        if len(df) > 1:
+            # 计算时间跨度
+            time_span = (df['time'].max() - df['time'].min()).days
+            if time_span > 0:
+                daily_growth = total_growth / time_span
+                daily_growth_percent = (total_growth_percent / time_span) if time_span > 0 else 0
+                daily_growth_info = f"Daily: {format_y_axis(daily_growth, None)} ({daily_growth_percent:+.1f}%)"
+            else:
+                # 如果时间跨度小于1天，计算每小时增长率
+                hours_span = (df['time'].max() - df['time'].min()).total_seconds() / 3600
+                if hours_span > 0:
+                    hourly_growth = total_growth / hours_span
+                    hourly_growth_percent = (total_growth_percent / hours_span) if hours_span > 0 else 0
+                    daily_growth_info = f"Hourly: {format_y_axis(hourly_growth, None)} ({hourly_growth_percent:+.1f}%)"
+        
+        # 计算最近一次变化（如果有多个数据点）
+        recent_change_info = ""
+        if len(df) > 1:
+            recent_change = current_followers - df['follower_count'].iloc[-2]
+            recent_change_percent = (recent_change / df['follower_count'].iloc[-2] * 100) if df['follower_count'].iloc[-2] > 0 else 0
+            recent_change_info = f"Last: {format_y_axis(recent_change, None)} ({recent_change_percent:+.1f}%)"
+        
+        # 构建统计信息文本
         stats_text = f"Current: {format_y_axis(current_followers, None)}\n"
-        stats_text += f"Growth: {format_y_axis(growth, None)} ({growth_percent:+.1f}%)\n"
+        stats_text += f"Total: {format_y_axis(total_growth, None)} ({total_growth_percent:+.1f}%)\n"
+        if daily_growth_info:
+            stats_text += f"{daily_growth_info}\n"
+        if recent_change_info:
+            stats_text += f"{recent_change_info}\n"
         stats_text += f"Range: {format_y_axis(min_followers, None)} - {format_y_axis(max_followers, None)}"
         
-        # 在图表右上角添加统计信息
-        ax.text(0.98, 0.98, stats_text,
+        # 在图表右下角添加统计信息
+        ax.text(0.98, 0.02, stats_text,
                 transform=ax.transAxes, fontsize=10,
-                verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8, edgecolor='#BDC3C7'))
+                verticalalignment='bottom', horizontalalignment='right',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, edgecolor='#BDC3C7'))
         
         # 添加生成时间
         generate_time = datetime.now().strftime('Generated: %Y-%m-%d %H:%M:%S')
@@ -696,6 +746,27 @@ async def generate_chart(platform: str, username: str):
         
         # 旋转X轴标签
         plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        
+        # 强制限制X轴tick数量，确保不超过设定值
+        current_ticks = len(ax.get_xticks())
+        if current_ticks > max_ticks:
+            # 如果当前tick数量超过限制，手动设置tick位置
+            if time_range.days > 30:
+                # 对于长时间范围，手动选择几个关键时间点
+                start_date = df['time'].min()
+                end_date = df['time'].max()
+                step_days = time_range.days // (max_ticks - 1)
+                manual_ticks = [start_date + pd.Timedelta(days=i * step_days) for i in range(max_ticks)]
+                ax.set_xticks(manual_ticks)
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            elif time_range.days > 7:
+                # 对于中等时间范围，手动选择几个关键时间点
+                start_date = df['time'].min()
+                end_date = df['time'].max()
+                step_days = time_range.days // (max_ticks - 1)
+                manual_ticks = [start_date + pd.Timedelta(days=i * step_days) for i in range(max_ticks)]
+                ax.set_xticks(manual_ticks)
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
         
         # 调整布局
         plt.tight_layout()

@@ -27,7 +27,6 @@ services:
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - TWITTER_AUTH_TOKEN=${TWITTER_AUTH_TOKEN:-}
-      - RSSHUB_URL=${RSSHUB_URL:-http://172.31.240.1:1200}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

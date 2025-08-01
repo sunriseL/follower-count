@@ -62,12 +62,6 @@ class Settings(BaseSettings):
             else:
                 # 本地环境，使用os.path.join
                 self.db_path = os.path.join(self.data_dir, clean_db_path)
-        
-        # 优先使用当前目录的数据库文件（本地开发时）
-        current_dir_db = os.path.join(os.getcwd(), 'data.db')
-        if os.path.exists(current_dir_db):
-            # 如果当前目录有数据库文件，优先使用它
-            self.db_path = current_dir_db
     
     @property
     def proxy_config(self) -> dict:
