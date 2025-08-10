@@ -852,6 +852,264 @@ async def get_stats():
         logger.error(f"Error getting stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# 在现有的imports后添加新的helper函数
+async def get_growth_data_from_date(platform: str, username: str, start_date: str):
+    """获取指定日期开始的数据，计算增长量"""
+    try:
+        async with aiosqlite.connect(settings.db_path) as db:
+            # 获取指定日期开始的所有数据
+            cursor = await db.execute("""
+                SELECT follower_count, time 
+                FROM social_media 
+                WHERE platform = ? AND username = ? AND date(time) >= date(?)
+                ORDER BY time ASC
+            """, (platform, username, start_date))
+            rows = await cursor.fetchall()
+            
+            if len(rows) < 2:
+                return None
+            
+            # 计算增长数据
+            initial_count = rows[0][0]
+            final_count = rows[-1][0]
+            total_growth = final_count - initial_count
+            growth_percentage = (total_growth / initial_count * 100) if initial_count > 0 else 0
+            
+            # 计算每日平均增长
+            time_span = (pd.to_datetime(rows[-1][1]) - pd.to_datetime(rows[0][1])).days
+            daily_growth = total_growth / time_span if time_span > 0 else 0
+            
+            return {
+                "username": username,
+                "platform": platform,
+                "initial_count": initial_count,
+                "final_count": final_count,
+                "total_growth": total_growth,
+                "growth_percentage": growth_percentage,
+                "daily_growth": daily_growth,
+                "time_span_days": time_span,
+                "data_points": len(rows)
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting growth data for {platform}/{username}: {e}")
+        return None
+
+# 在现有的API端点后添加新的比较端点
+@app.get("/api/compare/growth")
+async def compare_users_growth(
+    start_date: str = Query(..., description="起始日期 (YYYY-MM-DD格式)"),
+    users: str = Query(..., description="要比较的用户，格式: platform1:username1,platform2:username2")
+):
+    """比较多个用户在指定日期开始的数据增长量"""
+    try:
+        # 解析用户列表
+        user_list = []
+        for user_str in users.split(','):
+            if ':' in user_str:
+                platform, username = user_str.strip().split(':', 1)
+                user_list.append((platform.strip(), username.strip()))
+            else:
+                raise HTTPException(status_code=400, detail="用户格式错误，应为 platform:username 格式")
+        
+        if len(user_list) < 2:
+            raise HTTPException(status_code=400, detail="至少需要2个用户进行比较")
+        
+        # 验证日期格式
+        try:
+            pd.to_datetime(start_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="日期格式错误，应为 YYYY-MM-DD 格式")
+        
+        # 获取每个用户的增长数据
+        growth_data = []
+        for platform, username in user_list:
+            data = await get_growth_data_from_date(platform, username, start_date)
+            if data:
+                growth_data.append(data)
+            else:
+                logger.warning(f"No growth data available for {platform}/{username} from {start_date}")
+        
+        if len(growth_data) < 2:
+            raise HTTPException(status_code=404, detail="没有足够的数据进行比较")
+        
+        return {
+            "start_date": start_date,
+            "comparison_data": growth_data,
+            "summary": {
+                "total_users": len(growth_data),
+                "best_performer": max(growth_data, key=lambda x: x["growth_percentage"]),
+                "worst_performer": min(growth_data, key=lambda x: x["growth_percentage"])
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing users growth: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/compare/chart")
+async def generate_comparison_chart(
+    start_date: str = Query(..., description="起始日期 (YYYY-MM-DD格式)"),
+    users: str = Query(..., description="要比较的用户，格式: platform1:username1,platform2:username2")
+):
+    """生成多用户增长比较图表"""
+    try:
+        # 解析用户列表
+        user_list = []
+        for user_str in users.split(','):
+            if ':' in user_str:
+                platform, username = user_str.strip().split(':', 1)
+                user_list.append((platform.strip(), username.strip()))
+            else:
+                raise HTTPException(status_code=400, detail="用户格式错误，应为 platform:username 格式")
+        
+        if len(user_list) < 2:
+            raise HTTPException(status_code=400, detail="至少需要2个用户进行比较")
+        
+        # 验证日期格式
+        try:
+            start_datetime = pd.to_datetime(start_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="日期格式错误，应为 YYYY-MM-DD 格式")
+        
+        # 连接数据库获取数据
+        conn = sqlite3.connect(settings.db_path)
+        
+        # 为每个用户获取数据
+        all_data = []
+        for platform, username in user_list:
+            df = pd.read_sql_query(
+                'SELECT platform, username, follower_count, time FROM social_media WHERE platform = ? AND username = ? AND date(time) >= date(?) ORDER BY time ASC',
+                conn,
+                params=(platform, username, start_date)
+            )
+            if not df.empty:
+                df['time'] = pd.to_datetime(df['time'])
+                all_data.append(df)
+        
+        conn.close()
+        
+        if len(all_data) < 2:
+            raise HTTPException(status_code=404, detail="没有足够的数据进行比较")
+        
+        # 创建图表 - 只保留一个子图
+        plt.style.use('seaborn-v0_8')
+        fig, ax = plt.subplots(1, 1, figsize=(16, 10))
+        
+        # 颜色配置
+        colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#8B5A96', '#2E8B57']
+        
+        # 增长量趋势图（纵坐标是增长量）
+        for i, df in enumerate(all_data):
+            color = colors[i % len(colors)]
+            username = df['username'].iloc[0]
+            platform = df['platform'].iloc[0]
+            label = f"{username} ({platform})"
+            
+            # 计算相对于起始日期的增长量
+            initial_count = df['follower_count'].iloc[0]
+            df['growth_amount'] = df['follower_count'] - initial_count
+            
+            ax.plot(df['time'], df['growth_amount'], 
+                   marker='o', linewidth=2.5, markersize=6, 
+                   color=color, alpha=0.9, label=label,
+                   markeredgewidth=0, markerfacecolor=color, markeredgecolor='white')
+            
+            # 添加渐变填充
+            ax.fill_between(df['time'], df['growth_amount'], 
+                          alpha=0.2, color=color)
+        
+        ax.set_title(f"Follower Growth Amount Comparison (From {start_date})", 
+                    fontsize=18, fontweight='bold', pad=20, color='#2C3E50')
+        ax.set_xlabel("Time", fontsize=12, fontweight='bold', color='#2C3E50')
+        ax.set_ylabel("Growth Amount (Followers)", fontsize=12, fontweight='bold', color='#2C3E50')
+        # 先添加统计信息，再添加图例，避免重叠
+        # 计算统计信息
+        final_growth_data = []
+        for i, df in enumerate(all_data):
+            if len(df) >= 2:
+                final_growth = df['growth_amount'].iloc[-1]
+                username = df['username'].iloc[0]
+                platform = df['platform'].iloc[0]
+                label = f"{username} ({platform})"
+                
+                final_growth_data.append({
+                    'label': label,
+                    'growth_amount': final_growth
+                })
+        
+        # 按增长量排序
+        final_growth_data.sort(key=lambda x: x['growth_amount'], reverse=True)
+        
+        # 添加统计信息到左上角
+        stats_text = f"Comparison Period: {start_date} to Present\n"
+        stats_text += f"Total Users: {len(final_growth_data)}\n"
+        if final_growth_data:
+            best = final_growth_data[0]
+            worst = final_growth_data[-1]
+            stats_text += f"Best: {best['label']} ({best['growth_amount']:+,})\n"
+            stats_text += f"Worst: {worst['label']} ({worst['growth_amount']:+,})"
+        
+        ax.text(0.02, 0.98, stats_text,
+               transform=ax.transAxes, fontsize=10,
+               verticalalignment='top', horizontalalignment='left',
+               bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, edgecolor='#BDC3C7'))
+        
+        # 图例放在统计信息下方，避免重叠
+        ax.legend(loc='upper left', bbox_to_anchor=(0.02, 0.85), fontsize=10)
+        ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+        
+        # 设置Y轴格式（增长量可能为负数，需要特殊处理）
+        def format_growth_axis(x, pos):
+            if x == 0:
+                return '0'
+            elif x > 0:
+                if x >= 1e6:
+                    return f'+{x/1e6:.1f}M'
+                elif x >= 1e3:
+                    return f'+{x/1e3:.1f}K'
+                else:
+                    return f'+{int(x):,}'
+            else:
+                if abs(x) >= 1e6:
+                    return f'{x/1e6:.1f}M'
+                elif abs(x) >= 1e3:
+                    return f'{x/1e3:.1f}K'
+                else:
+                    return f'{int(x):,}'
+        
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(format_growth_axis))
+        
+        # 添加零线（基准线）
+        ax.axhline(y=0, color='#95A5A6', linestyle='--', alpha=0.7, linewidth=1)
+        
+        # 添加生成时间
+        generate_time = datetime.now().strftime('Generated: %Y-%m-%d %H:%M:%S')
+        ax.text(0.02, 0.02, generate_time,
+               fontsize=8, color='#7F8C8D',
+               transform=ax.transAxes,
+               verticalalignment='bottom')
+        
+        # 调整布局
+        plt.tight_layout()
+        
+        # 保存到内存
+        buffer = BytesIO()
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', 
+                   pad_inches=0.2, facecolor='white', edgecolor='none')
+        buffer.seek(0)
+        plt.close()
+        
+        # 返回图片
+        return Response(content=buffer.getvalue(), media_type="image/png")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating comparison chart: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating comparison chart: {str(e)}")
 
 
 if __name__ == "__main__":
