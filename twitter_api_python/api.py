@@ -33,17 +33,17 @@ class TwitterAPI:
             # 使用用户名
             variables = {
                 'screen_name': user_id,
-                'withSafetyModeUserFields': True
+                'withGrokTranslatedBio': False
             }
             features = GQL_FEATURES['UserByScreenName']
             endpoint = GQL_MAP['UserByScreenName']
         
         params = {
-            'variables': json.dumps(variables),
-            'features': json.dumps(features),
+            'variables': json.dumps(variables, separators=(',', ':')),  # 移除空格
+            'features': json.dumps(features, separators=(',', ':')),  # 移除空格
             'fieldToggles': json.dumps({
-                'withAuxiliaryUserLabels': False
-            })
+                'withAuxiliaryUserLabels': True
+            }, separators=(',', ':'))  # 移除空格
         }
         
         url = f"{BASE_URL}{endpoint}"

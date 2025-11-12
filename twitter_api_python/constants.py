@@ -5,7 +5,8 @@ BASE_URL = 'https://x.com/i/api'
 # GraphQL endpoints
 GRAPHQL_ENDPOINTS_PLAIN = [
     '/graphql/E3opETHurmVJflFsUBVuUQ/UserTweets',
-    '/graphql/Yka-W8dz7RaEuQNkroPkYw/UserByScreenName',
+    # '/graphql/Yka-W8dz7RaEuQNkroPkYw/UserByScreenName',
+    '/graphql/ZHSN3WlvahPKVvUxVQbg1A/UserByScreenName',
     '/graphql/HJFjzBgCs16TqxewQOeLNg/HomeTimeline',
     '/graphql/DiTkXJgLqBBxCs7zaYsbtA/HomeLatestTimeline',
     '/graphql/bt4TKuFz4T7Ckk-VvQVSow/UserTweetsAndReplies',
@@ -31,8 +32,10 @@ THIRD_PARTY_SUPPORTED_API = [
 # GQL Features
 GQL_FEATURE_USER = {
     "hidden_profile_subscriptions_enabled": True,
+    "payments_enabled": False,
+    "profile_label_improvements_pcf_label_in_post_enabled": True,
+    "responsive_web_profile_redirect_enabled": False,
     "rweb_tipjar_consumption_enabled": True,
-    "responsive_web_graphql_exclude_directive_enabled": True,
     "verified_phone_label_enabled": False,
     "subscriptions_verification_info_is_identity_verified_enabled": True,
     "subscriptions_verification_info_verified_since_enabled": True,
@@ -128,4 +131,5 @@ TIMELINE_PARAMS = {
 }
 
 # Bearer token
+# BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA' 
 BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA' 

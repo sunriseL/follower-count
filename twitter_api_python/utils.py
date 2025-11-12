@@ -64,8 +64,12 @@ class TwitterUtils:
             }
             
             # 访问 Twitter 主页获取 CSRF token
+            logger.info(f"Requesting CSRF token from https://x.com")
+            logger.info(f"Request headers: {headers}")
+            logger.info(f"Request cookies: {cookies}")
+            logger.info(f"Request proxies: {proxies}")
             response = requests.get(
-                'https://x.com',
+                'https://x.com/home',
                 headers=headers,
                 cookies=cookies,
                 proxies=proxies,
@@ -121,7 +125,8 @@ class TwitterUtils:
             url = "https://api.twitter.com/1.1/guest/activate.json"
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
+                'Authorization': BEARER_TOKEN,
+                'Content-Type': 'application/json',
             }
             
             response = requests.post(url, headers=headers, proxies=self.proxies, timeout=10)
@@ -131,7 +136,7 @@ class TwitterUtils:
                 logger.info(f"Successfully obtained guest token: {self.guest_token}")
                 return self.guest_token
             else:
-                logger.error(f"Failed to get guest token, status: {response.status_code}")
+                logger.error(f"Failed to get guest token, status: {response.status_code}, response: {response.text}")
                 return None
         except Exception as e:
             logger.error(f"Failed to get guest token: {e}")
@@ -145,8 +150,34 @@ class TwitterUtils:
             logger.warning("No valid Twitter token found, but continuing with guest mode")
             # 在简化模式下，即使没有认证也继续执行
         
-        # 构建请求URL
-        request_url = f"{url}?{urlencode(params)}"
+        # 确保在没有auth token时获取guest token
+        if not auth:
+            if not self.guest_token:
+                self.get_guest_token()
+        
+        # 构建请求URL - params中的值已经是JSON字符串
+        # 确保参数顺序：variables, features, fieldToggles
+        from urllib.parse import quote
+        ordered_params = {}
+        for key in ['variables', 'features', 'fieldToggles']:
+            if key in params:
+                ordered_params[key] = params[key]
+        # 添加其他参数
+        for key, value in params.items():
+            if key not in ordered_params:
+                ordered_params[key] = value
+        
+        # 手动构建查询字符串，使用quote确保空格编码为%20而不是+
+        query_parts = []
+        for key, value in ordered_params.items():
+            # value已经是JSON字符串，使用quote编码（空格会变成%20）
+            encoded_key = quote(str(key), safe='')
+            encoded_value = quote(str(value), safe='')
+            query_parts.append(f"{encoded_key}={encoded_value}")
+        request_url = f"{url}?{'&'.join(query_parts)}"
+        
+        # 记录请求URL（截断以避免日志过长）
+        logger.debug(f"Request URL: {request_url[:200]}...")
         
         # 获取cookies
         cookies = self.token_to_cookie(auth['token'] if auth else None)
@@ -160,10 +191,19 @@ class TwitterUtils:
             'cache-control': 'no-cache',
             'content-type': 'application/json',
             'dnt': '1',
+            'origin': 'https://x.com',
             'pragma': 'no-cache',
             'referer': 'https://x.com/',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'x-twitter-active-user': 'yes',
             'x-twitter-client-language': 'en',
+            'x-twitter-client-version': '1.0.0',
         }
         
         # 添加认证相关headers
@@ -207,7 +247,12 @@ class TwitterUtils:
                     if cookies:
                         return self.twitter_request(url, params, allow_no_auth)
             else:
-                logger.error(f"Request failed: {response.status_code} - {response.text}")
+                logger.error(f"Request failed: {response.status_code}")
+                logger.error(f"Response text: {response.text[:1000]}")
+                logger.error(f"Request URL: {request_url[:500]}")
+                logger.error(f"Request headers: {headers}")
+                logger.error(f"Request cookies: {cookies}")
+                logger.error(f"Request proxies: {self.proxies}")
             
             return None
             
@@ -221,8 +266,8 @@ class TwitterUtils:
             variables = {}
         
         params = {
-            'variables': json.dumps({**variables, 'userId': user_id}),
-            'features': json.dumps(GQL_FEATURES.get(endpoint, {}))
+            'variables': json.dumps({**variables, 'userId': user_id}, separators=(',', ':')),  # 移除空格
+            'features': json.dumps(GQL_FEATURES.get(endpoint, {}), separators=(',', ':'))  # 移除空格
         }
         
         url = f"{BASE_URL}{GQL_MAP[endpoint]}"
